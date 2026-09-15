@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Verifica el enlace entre el microkernel (HU03) y el banco de preguntas de
  * HU02: una pregunta generada por un plugin debe terminar visible a traves
- * de IQuestionService, el mismo servicio que consume GUIQuestions.
+ * de IQuestionService, el mismo servicio que consumen las vistas de HU02.
  */
 class QuestionBankBridgeTest {
 

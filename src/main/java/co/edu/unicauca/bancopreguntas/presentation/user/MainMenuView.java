@@ -10,7 +10,8 @@ import co.edu.unicauca.bancopreguntas.microkernel.QuestionBankBridge;
 import co.edu.unicauca.bancopreguntas.microkernel.QuestionMicrokernel;
 import co.edu.unicauca.bancopreguntas.presentation.GUIObserver1;
 import co.edu.unicauca.bancopreguntas.presentation.GUIObserver2;
-import co.edu.unicauca.bancopreguntas.presentation.GUIQuestions;
+import co.edu.unicauca.bancopreguntas.presentation.GUIQuestionLoad;
+import co.edu.unicauca.bancopreguntas.presentation.GUIQuestionUpdate;
 import co.edu.unicauca.bancopreguntas.presentation.QuestionController;
 import co.edu.unicauca.bancopreguntas.presentation.microkernel.GUIMicrokernel;
 import co.edu.unicauca.bancopreguntas.service.user.IUserService;
@@ -107,22 +108,28 @@ public class MainMenuView extends JFrame {
     }
 
     /**
-     * Ensambla y abre las vistas de HU02 (banco de preguntas y sus
-     * observadores de estadisticas).
+     * Ensambla y abre las vistas de HU02: la consulta de preguntas, la
+     * actualizacion de estado (cada una en su propia ventana) y los
+     * observadores de estadisticas. Las cuatro observan el mismo servicio, de
+     * modo que un cambio hecho en una se refleja de inmediato en las demas.
      */
     private void openQuestionBank() {
         QuestionService service = questionService();
         QuestionController controller = new QuestionController(service);
 
-        GUIQuestions mainView = new GUIQuestions(controller);
+        GUIQuestionLoad loadView = new GUIQuestionLoad(controller);
+        GUIQuestionUpdate updateView = new GUIQuestionUpdate(controller);
         GUIObserver1 statisticsView = new GUIObserver1();
         GUIObserver2 chartView = new GUIObserver2();
 
+        service.addObserver(loadView);
+        service.addObserver(updateView);
         service.addObserver(statisticsView);
         service.addObserver(chartView);
         service.notifyAllObservers(service.getStatistics());
 
-        mainView.setVisible(true);
+        loadView.setVisible(true);
+        updateView.setVisible(true);
         statisticsView.setVisible(true);
         chartView.setVisible(true);
     }

@@ -2,7 +2,7 @@ package co.edu.unicauca.bancopreguntas.presentation;
 
 import co.edu.unicauca.bancopreguntas.domain.Question;
 import co.edu.unicauca.bancopreguntas.domain.QuestionDistractors;
-import co.edu.unicauca.bancopreguntas.domain.QuestionState;
+import co.edu.unicauca.bancopreguntas.infra.Observer;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -16,6 +16,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -31,11 +32,14 @@ import java.util.Optional;
 /**
  * Capa de presentacion.
  *
- * Vista principal del micro patron MVC: permite seleccionar una pregunta del
- * banco, ver su detalle y cambiar su estado. No calcula nada, todo lo delega en
- * el controlador.
+ * Vista de consulta del micro patron MVC: permite seleccionar una pregunta del
+ * banco y cargar su detalle en modo solo lectura. No modifica el modelo, el
+ * cambio de estado vive en {@link GUIQuestionUpdate}.
+ *
+ * Al ser observadora del modelo, refresca la lista y el detalle cuando otra
+ * vista cambia el estado de una pregunta o el microkernel agrega una nueva.
  */
-public class GUIQuestions extends JFrame {
+public class GUIQuestionLoad extends JFrame implements Observer {
 
     private final QuestionController controller;
 
@@ -46,29 +50,30 @@ public class GUIQuestions extends JFrame {
     private final JTextArea txtOptions = new JTextArea(4, 20);
     private final JTextField txtCorrectAnswer = new JTextField();
     private final JTextField txtCurrentState = new JTextField();
-    private final JComboBox<QuestionState> cmbNewState = new JComboBox<>(QuestionState.values());
     private final JButton btnLoad = new JButton("Cargar pregunta");
-    private final JButton btnUpdate = new JButton("Actualizar estado");
+
+    /** Evita reaccionar a los eventos del comboBox mientras se repuebla. */
+    private boolean reloading;
 
     /**
      * @param controller controlador del MVC.
      */
-    public GUIQuestions(QuestionController controller) {
+    public GUIQuestionLoad(QuestionController controller) {
         this.controller = controller;
         initComponents();
-        loadQuestionsIntoCombo();
         registerListeners();
+        reloadQuestions();
     }
 
     /**
      * Construye la interfaz grafica.
      */
     private void initComponents() {
-        setTitle("Banco de Preguntas Saber Pro - Gestion de preguntas");
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setTitle("Banco de Preguntas Saber Pro - Consulta de preguntas");
+        setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
         setLayout(new BorderLayout(10, 10));
 
-        JLabel lblTitle = new JLabel("GESTION DE PREGUNTAS", JLabel.CENTER);
+        JLabel lblTitle = new JLabel("CONSULTA DE PREGUNTAS", JLabel.CENTER);
         lblTitle.setFont(lblTitle.getFont().deriveFont(Font.BOLD, 16f));
         lblTitle.setBorder(BorderFactory.createEmptyBorder(10, 10, 0, 10));
         add(lblTitle, BorderLayout.NORTH);
@@ -78,10 +83,10 @@ public class GUIQuestions extends JFrame {
         center.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         center.add(buildSelectorPanel());
         center.add(Box.createVerticalStrut(10));
-        center.add(buildFormPanel());
+        center.add(buildDetailPanel());
         add(center, BorderLayout.CENTER);
 
-        setSize(520, 640);
+        setSize(520, 560);
         setLocation(30, 30);
     }
 
@@ -114,16 +119,15 @@ public class GUIQuestions extends JFrame {
     }
 
     /**
-     * @return panel con el formulario de detalle de la pregunta.
+     * @return panel con el detalle de la pregunta, todo en solo lectura.
      */
-    private JPanel buildFormPanel() {
+    private JPanel buildDetailPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("FORMULARIO DE PREGUNTA"));
+        panel.setBorder(BorderFactory.createTitledBorder("DETALLE DE LA PREGUNTA"));
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         txtStatement.setLineWrap(true);
         txtStatement.setWrapStyleWord(true);
-        txtOptions.setEditable(false);
         txtOptions.setBackground(new Color(245, 245, 245));
 
         int row = 0;
@@ -132,27 +136,20 @@ public class GUIQuestions extends JFrame {
         addField(panel, row++, "Pregunta:", new JScrollPane(txtStatement));
         addField(panel, row++, "Opciones:", new JScrollPane(txtOptions));
         addField(panel, row++, "Respuesta correcta:", txtCorrectAnswer);
-        addField(panel, row++, "Estado actual:", txtCurrentState);
-        addField(panel, row++, "Nuevo estado:", cmbNewState);
+        addField(panel, row, "Estado actual:", txtCurrentState);
 
         txtId.setEditable(false);
         txtName.setEditable(false);
         txtStatement.setEditable(false);
+        txtOptions.setEditable(false);
         txtCorrectAnswer.setEditable(false);
         txtCurrentState.setEditable(false);
-
-        GridBagConstraints gbc = baseConstraints();
-        gbc.gridx = 1;
-        gbc.gridy = row;
-        gbc.fill = GridBagConstraints.NONE;
-        gbc.anchor = GridBagConstraints.WEST;
-        panel.add(btnUpdate, gbc);
 
         return panel;
     }
 
     /**
-     * Agrega una fila etiqueta/campo al formulario.
+     * Agrega una fila etiqueta/campo al detalle.
      */
     private void addField(JPanel panel, int row, String label, Component field) {
         GridBagConstraints gbc = baseConstraints();
@@ -178,32 +175,57 @@ public class GUIQuestions extends JFrame {
     }
 
     /**
-     * Conecta los eventos de los botones con el controlador.
+     * Conecta los eventos de la vista con el controlador.
      */
     private void registerListeners() {
         btnLoad.addActionListener(event -> loadSelectedQuestion());
-        btnUpdate.addActionListener(event -> updateState());
     }
 
     /**
-     * Pide al controlador las preguntas y llena el comboBox.
+     * Pide al controlador las preguntas, llena el comboBox conservando la
+     * seleccion actual y refresca el detalle mostrado.
      */
-    private void loadQuestionsIntoCombo() {
+    private void reloadQuestions() {
+        Question selected = (Question) cmbQuestions.getSelectedItem();
+        String selectedId = selected == null ? null : selected.getId();
+
+        reloading = true;
         cmbQuestions.removeAllItems();
         List<Question> questions = controller.listQuestions();
         for (Question question : questions) {
             cmbQuestions.addItem(question);
         }
-        if (!questions.isEmpty()) {
-            cmbQuestions.setSelectedIndex(0);
-            loadSelectedQuestion();
+        reloading = false;
+
+        if (questions.isEmpty()) {
+            clearDetail();
+            return;
         }
+        cmbQuestions.setSelectedIndex(indexOf(questions, selectedId));
+        loadSelectedQuestion();
     }
 
     /**
-     * Carga en el formulario los datos de la pregunta seleccionada.
+     * @param questions preguntas cargadas en el comboBox.
+     * @param id        identificador que estaba seleccionado, puede ser null.
+     * @return posicion de esa pregunta, o 0 si ya no esta en el banco.
+     */
+    private int indexOf(List<Question> questions, String id) {
+        for (int i = 0; i < questions.size(); i++) {
+            if (questions.get(i).getId().equals(id)) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Carga en el detalle los datos de la pregunta seleccionada.
      */
     private void loadSelectedQuestion() {
+        if (reloading) {
+            return;
+        }
         Question selected = (Question) cmbQuestions.getSelectedItem();
         if (selected == null) {
             return;
@@ -218,7 +240,7 @@ public class GUIQuestions extends JFrame {
     }
 
     /**
-     * Vuelca una pregunta en los campos del formulario.
+     * Vuelca una pregunta en los campos del detalle.
      *
      * @param question pregunta a mostrar.
      */
@@ -227,6 +249,7 @@ public class GUIQuestions extends JFrame {
         txtId.setText(question.getId());
         txtName.setText(question.getName());
         txtStatement.setText(question.getStatement());
+        txtStatement.setCaretPosition(0);
 
         StringBuilder options = new StringBuilder();
         for (int i = 0; i < distractors.getOptions().size(); i++) {
@@ -237,37 +260,28 @@ public class GUIQuestions extends JFrame {
 
         txtCorrectAnswer.setText(distractors.getCorrectLetter() + ". " + distractors.getCorrectAnswer());
         txtCurrentState.setText(question.getState().getLabel());
-        cmbNewState.setSelectedItem(question.getState());
     }
 
     /**
-     * Solicita al controlador el cambio de estado de la pregunta cargada. El
-     * modelo se encarga de notificar a las vistas observadoras.
+     * Deja el detalle en blanco cuando el banco no tiene preguntas.
      */
-    private void updateState() {
-        String id = txtId.getText();
-        if (id.isBlank()) {
-            JOptionPane.showMessageDialog(this, "Primero cargue una pregunta",
-                    "Aviso", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        QuestionState newState = (QuestionState) cmbNewState.getSelectedItem();
-        try {
-            boolean updated = controller.changeState(id, newState);
-            if (updated) {
-                controller.findById(id).ifPresent(this::showQuestion);
-                cmbQuestions.repaint();
-                JOptionPane.showMessageDialog(this,
-                        "Estado actualizado a: " + newState.getLabel(),
-                        "Informacion", JOptionPane.INFORMATION_MESSAGE);
-            } else {
-                JOptionPane.showMessageDialog(this, "No fue posible actualizar el estado",
-                        "Aviso", JOptionPane.WARNING_MESSAGE);
-            }
-        } catch (IllegalStateException | IllegalArgumentException ex) {
-            JOptionPane.showMessageDialog(this, ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
-            controller.findById(id).ifPresent(this::showQuestion);
-        }
+    private void clearDetail() {
+        txtId.setText("");
+        txtName.setText("");
+        txtStatement.setText("");
+        txtOptions.setText("");
+        txtCorrectAnswer.setText("");
+        txtCurrentState.setText("");
+    }
+
+    /**
+     * El modelo publico un cambio: se vuelve a leer el banco para que la lista
+     * y el detalle queden al dia.
+     *
+     * @param data estadisticas publicadas por el modelo, no se usan aqui.
+     */
+    @Override
+    public void update(Object data) {
+        SwingUtilities.invokeLater(this::reloadQuestions);
     }
 }

@@ -16,7 +16,7 @@ import java.util.List;
  * dominio mas rico usado por la gestion del banco de preguntas
  * ({@code co.edu.unicauca.bancopreguntas.domain.Question}, con distractores
  * y estado) y la registra en el {@link IQuestionService} compartido, de
- * modo que aparece automaticamente en la vista de HU02 (GUIQuestions) y
+ * modo que aparece automaticamente en la vistas de HU02 (GUIQuestionLoad/GUIQuestionUpdate) y
  * dispara la notificacion a sus observadores de estadisticas.
  */
 public class QuestionBankBridge {
